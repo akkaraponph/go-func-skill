@@ -56,19 +56,31 @@ Skills work with any agent that can read Markdown instructions. For [Claude Code
 | **Personal** (all your projects) | `~/.claude/skills/<name>/` | Available in every session |
 | **Project** (shared with a repo) | `<repo>/.claude/skills/<name>/` | Available to anyone working in that repo |
 
+**macOS / Linux (bash):**
+
 ```bash
 # Personal install (copy)
-cp -r go-func ~/.claude/skills/go-func
+cp -r go-func      ~/.claude/skills/go-func
+cp -r safety-first ~/.claude/skills/safety-first
 
-# …or symlink so it tracks this repo
-ln -s "$(pwd)/go-func" ~/.claude/skills/go-func
+# …or symlink so they track this repo
+ln -s "$(pwd)/go-func"      ~/.claude/skills/go-func
+ln -s "$(pwd)/safety-first" ~/.claude/skills/safety-first
 ```
 
-On Windows (PowerShell):
+**Windows (PowerShell):**
 
 ```powershell
-Copy-Item -Recurse go-func "$env:USERPROFILE\.claude\skills\go-func"
+# Personal install (copy)
+Copy-Item -Recurse go-func      "$env:USERPROFILE\.claude\skills\go-func"
+Copy-Item -Recurse safety-first "$env:USERPROFILE\.claude\skills\safety-first"
+
+# …or symlink so they track this repo
+New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.claude\skills\go-func"      -Target "$pwd\go-func"
+New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.claude\skills\safety-first" -Target "$pwd\safety-first"
 ```
+
+To install for a single repo instead of all your projects, swap `~/.claude/skills/` (or `$env:USERPROFILE\.claude\skills\`) for `<repo>/.claude/skills/`.
 
 Once installed, the agent triggers the skill automatically when a task matches its `description`. You don't have to name it — though you can invoke it explicitly (e.g. `/go-func` in Claude Code) to force it.
 
