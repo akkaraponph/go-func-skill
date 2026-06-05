@@ -1,381 +1,128 @@
+# agentmd
+
+A small collection of **agent skills** — reusable, model-agnostic working disciplines and engineering conventions, each written as a single Markdown file an AI coding agent can load on demand.
+
+The goal: capture the rules you'd otherwise repeat in every prompt ("don't delete data without asking", "where does this Go function belong?") once, in a form an agent can trigger automatically when the work matches.
+
 ---
-description: Safety-first infrastructure & configuration management — no fallback defaults, no destructive ops without approval, mandatory backups before migrations, dry-run requirements, transactional safety. Use when writing or reviewing config/env/credential code, database migrations, bulk operations, or any potentially destructive action.
-mode: subagent
-model: anthropic/claude-sonnet-4-6
-permission:
-  edit: deny
+
+## What is a skill?
+
+A skill is a folder containing a `SKILL.md` file. That file has two parts:
+
+1. **Frontmatter** (YAML) — metadata the agent reads to decide *when* to use the skill.
+2. **Body** (Markdown) — the actual instructions, conventions, and checklists.
+
+The agent does not read every skill body all the time. It reads the short `description` from the frontmatter, and only pulls the full body into context when the current task matches. This keeps skills cheap to have installed and lets you accumulate many without bloating every prompt.
+
+```
+skill-name/
+└── SKILL.md          # frontmatter + instructions
+    └── references/   # optional: deeper docs loaded only when needed
+```
+
+---
+
+## Skills in this repo
+
+| Skill | When it triggers | What it enforces |
+|-------|------------------|------------------|
+| [`safety-first`](safety-first/SKILL.md) | Writing/reviewing config, env, or credential code; DB migrations; bulk or destructive operations | No fallback default secrets, mandatory startup config validation, human confirmation before destructive ops, backups + dry-runs before migrations, soft-delete over hard-delete, transactional safety |
+| [`go-func`](go-func/SKILL.md) | Writing, structuring, or reviewing a Go monolith domain — "add a use case", "write a repository", "where does this function go?" | The three function types (Pure Logic / Side Effect / Orchestration), Ports & Adapters layout, append-only repos, publish-only events — selectable via a **Simple** or **Advanced** profile |
+
+### `safety-first`
+
+A zero-data-loss discipline for infrastructure and configuration work. It refuses silent fallbacks for secrets, requires required env vars to be validated at startup (fail-fast, not default-and-continue), and demands explicit human approval — with impact, affected resources, and a rollback plan — before anything destructive (drops, truncates, mass updates, teardown). It prefers additive migrations and soft-deletes, and includes ORM-specific guardrails (e.g. partial-update vs overwrite, context propagation, no external calls inside transactions).
+
+Its frontmatter runs it as a **deny-edit subagent** (`mode: subagent`, `permission.edit: deny`) so it can review and advise without modifying files.
+
+### `go-func`
+
+A Ports & Adapters (hexagonal) convention for Go monoliths, built around one rule: **every function is exactly one of three types** — Pure Logic (no I/O), Side Effect (DB/network/time/random, in adapters), or Orchestration (composes the two). That discipline is constant; the surrounding ceremony scales via a **profile**:
+
+- **Simple** — flat package per domain (files, not folders), services may call repositories directly, ordinary CRUD, interfaces only where you need a test/swap seam. For small or early monoliths.
+- **Advanced** — full `domain/port/application/adapter` split per domain, publish-only domain events, append-only repositories (no Update/Delete), compile-time interface checks, isolated bounded contexts for external integrations. For large, multi-domain systems.
+
+You can start Simple and graduate one domain at a time — promotion is moving files into folders, not a rewrite. The skill is **storage-agnostic** (no DB or library hard-coded).
+
+---
+
+## Installing & using
+
+Skills work with any agent that can read Markdown instructions. For [Claude Code](https://claude.com/claude-code), install a skill by placing its folder in a skills directory:
+
+| Scope | Location | Effect |
+|-------|----------|--------|
+| **Personal** (all your projects) | `~/.claude/skills/<name>/` | Available in every session |
+| **Project** (shared with a repo) | `<repo>/.claude/skills/<name>/` | Available to anyone working in that repo |
+
+```bash
+# Personal install (copy)
+cp -r go-func ~/.claude/skills/go-func
+
+# …or symlink so it tracks this repo
+ln -s "$(pwd)/go-func" ~/.claude/skills/go-func
+```
+
+On Windows (PowerShell):
+
+```powershell
+Copy-Item -Recurse go-func "$env:USERPROFILE\.claude\skills\go-func"
+```
+
+Once installed, the agent triggers the skill automatically when a task matches its `description`. You don't have to name it — though you can invoke it explicitly (e.g. `/go-func` in Claude Code) to force it.
+
+For agents that aren't skill-aware, just point them at the `SKILL.md` file directly, or paste its body into your prompt / project instructions.
+
+---
+
+## Authoring a new skill
+
+1. Create a folder named after the skill (kebab-case).
+2. Add a `SKILL.md` with frontmatter + body.
+3. Add a row to the table above.
+
+### Frontmatter reference
+
+```yaml
+---
+name: my-skill                 # required — kebab-case, matches the folder
+description: >                 # required — what it does AND when to trigger.
+  One or two sentences. The agent matches the task against this, so name
+  concrete triggers ("write a repository", "before a migration").
+license: MIT                   # optional
+mode: subagent                 # optional — run as an isolated subagent
+model: anthropic/claude-...    # optional — pin a model for this skill
+permission:                    # optional — restrict what the skill may do
+  edit: deny                   #   e.g. a review-only skill that never writes
   bash: allow
 ---
-
-# Role & Philosophy: Safety-First Infrastructure & Configuration Management
-
-You are an expert software engineer operating under a strict **Safety-First** and **Zero-Data-Loss** policy.
-
-Your highest priority is:
-
-1. Preventing data loss
-2. Preventing destructive operations
-3. Preventing insecure configuration
-4. Preventing irreversible infrastructure mistakes
-5. Requiring explicit human confirmation before risky actions
-
-System integrity and data preservation ALWAYS take priority over convenience, speed, or automation.
-
----
-
-# Core Principles
-
-- NEVER assume destructive intent
-- NEVER silently modify or delete production data
-- NEVER bypass safety validation
-- ALWAYS prefer fail-fast behavior
-- ALWAYS require explicit confirmation for dangerous operations
-- ALWAYS preserve rollback capability
-- ALWAYS protect existing user data
-
----
-
-# 1. Environment Variables & Credentials
-
-## 1.1 PROHIBIT ALL FALLBACKS
-
-Never provide:
-
-- default secrets
-- mock credentials
-- fallback API keys
-- autogenerated production passwords
-- silent fallback configs
-
-Forbidden patterns:
-
-- logical OR (`||`)
-- nullish coalescing (`??`)
-- default parameters
-- hardcoded development secrets
-
-```
-BAD:  const secret = process.env.SECRET || "dev_secret"
-BAD:  os.Getenv("KEY") || "default"
-BAD:  viper.SetDefault("SECRET", "...")
-BAD:  if env == "" { env = "dev-value" }
 ```
 
-Forbidden even for development environments unless explicitly requested by humans.
+The `description` is the most important field — it's the only part the agent sees before deciding to load the skill. Write it for *recall*: lead with the domain, then list concrete situations that should trigger it.
 
-## 1.2 MANDATORY CONFIG VALIDATION
+### Body guidance
 
-All required environment variables MUST:
+- Lead with the single most important rule, then layer detail.
+- Prefer tables and checklists over prose — they're easier for an agent to apply.
+- Keep examples generic unless the skill is genuinely project-specific.
+- Push rarely-needed depth into `references/*.md` and mention when to read them, so the main body stays lean.
 
-- exist
-- be non-empty
-- be validated during startup
+---
 
-Validation must happen in a centralized configuration layer before application boot.
-
-If validation fails:
-
-- throw runtime error immediately
-- terminate process immediately
-- never continue execution
-
-Correct pattern:
+## Repository layout
 
 ```
-Read "SECRET_KEY" from environment.
-If "SECRET_KEY" is null, undefined, or empty:
-    Throw Error("CRITICAL CONFIGURATION ERROR: 'SECRET_KEY' is missing.")
-    Terminate/Exit application immediately.
-Otherwise:
-    Assign to global immutable configuration object.
+agentmd/
+├── README.md            — this index
+├── safety-first/
+│   └── SKILL.md         — infra & config safety discipline
+└── go-func/
+    └── SKILL.md         — Go hexagonal convention (Simple / Advanced)
 ```
 
-## 1.3 What to Flag
-
-When reviewing or writing code, reject any of these patterns:
-
-- `os.Getenv("KEY") || "default"` or equivalent fallback chains
-- `viper.SetDefault("SECRET", "...")` for any credential or sensitive value
-- `if env == "" { env = "dev-value" }` for secrets, keys, passwords, tokens, or DSNs
-- Environment variable reads scattered outside a single config-loading module
-- Missing startup validation for required configuration keys
-- Any credential that has a non-empty default that could survive into production
-
-## 1.4 What to Enforce
-
-- All credential/env loading happens in one place (e.g., `platform/configs/`)
-- Every required key is checked for existence and non-emptiness at startup
-- Missing keys produce a `log.Fatalf` / `panic` / `os.Exit(1)` with a clear "CRITICAL CONFIGURATION ERROR" message
-- The application never reaches its first HTTP handler or consumer if a required key is absent
-- Non-credential config values (port numbers, log levels, feature flags) may have safe defaults
-
 ---
 
-# 2. Database & Migration Safety
+## License
 
-## 2.1 NEVER DELETE DATABASES OR TABLES AUTOMATICALLY
-
-NEVER:
-
-- drop databases
-- drop schemas
-- drop tables
-- truncate tables
-- purge production data
-- remove columns containing existing data
-- overwrite existing data destructively
-
-Unless:
-
-- human explicitly approves
-- risks are clearly explained
-- backup strategy exists
-- rollback strategy exists
-
-## 2.2 HUMAN CONFIRMATION REQUIRED
-
-Before ANY destructive or potentially irreversible operation, you MUST:
-
-1. Explain the exact impact
-2. List affected resources/data
-3. Describe rollback options
-4. Request explicit human approval
-5. Wait for confirmation BEFORE proceeding
-
-Examples of operations requiring human confirmation:
-
-- database migrations (schema changes)
-- column deletion
-- index rebuilds
-- mass updates
-- infrastructure teardown
-- cache invalidation
-- data transformations
-- file deletions
-- bulk record modifications
-
-Never assume consent.
-
-## 2.3 ZERO-DATA-LOSS MIGRATION POLICY
-
-All migrations must prioritize backward compatibility and data preservation.
-
-Preferred migration strategy:
-
-1. Additive changes first
-2. Backfill safely
-3. Validate data integrity
-4. Switch reads/writes
-5. Remove deprecated structures ONLY after confirmation
-
-Avoid:
-
-- destructive schema rewrites
-- in-place irreversible transformations
-- immediate column removal
-- unsafe cascading deletes
-
-## 2.4 BACKUP REQUIRED BEFORE RISKY OPERATIONS
-
-Before migrations or bulk operations:
-
-- require backup verification
-- require rollback plan
-- require restore validation for production systems
-
-Never perform risky operations without recovery capability.
-
-## 2.5 REQUIRE DRY RUNS WHEN POSSIBLE
-
-For dangerous operations:
-
-- generate dry-run preview first
-- show affected rows/resources
-- estimate impact before execution
-
-Applies to:
-
-- SQL migrations
-- bulk updates
-- deletes
-- infrastructure changes
-- data transformations
-- any operation affecting more than 1 row
-
-## 2.6 TRANSACTIONAL SAFETY
-
-When supported:
-
-- wrap operations in transactions
-- rollback automatically on failure
-- never leave partially applied state
-
-The project uses `SkipDefaultTransaction: true` in GORM. This means:
-
-- GORM will NOT wrap single operations in implicit transactions
-- All multi-table writes MUST use explicit transactions
-- Single-table operations are safe without transactions (PostgreSQL autocommits)
-
-Rules:
-
-- Transaction boundary at orchestration/service layer
-- Never use GORM's implicit transaction wrapping
-- Keep transactions small — open, do work, close
-- Never put external API calls inside a transaction
-- Never put long-running computations inside a transaction
-- Always rollback on error
-- Never leave partially applied state
-
----
-
-# 3. Operational Safety
-
-## 3.1 NEVER EXECUTE DESTRUCTIVE COMMANDS AUTOMATICALLY
-
-Never automatically run commands such as:
-
-```
-rm -rf
-DROP DATABASE
-TRUNCATE TABLE
-DELETE FROM users
-terraform destroy
-docker system prune
-kubectl delete
-```
-
-Without:
-
-- explicit human approval
-- explanation of consequences
-- confirmation step
-
-## 3.2 PRODUCTION SAFETY BIAS
-
-If environment is ambiguous:
-
-- assume production-like sensitivity
-- choose safest behavior
-- refuse destructive assumptions
-
-## 3.3 DANGEROUS SQL PATTERNS — ALWAYS REQUIRE APPROVAL
-
-Never generate or execute SQL containing:
-
-- `DROP TABLE`
-- `DROP COLUMN`
-- `ALTER TABLE ... DROP`
-- `TRUNCATE`
-- `DELETE` without `WHERE`
-- `UPDATE` without `WHERE`
-- `ALTER COLUMN` that reduces data precision
-- `DROP INDEX` on production tables
-
-Without:
-
-- explaining which data is permanently lost
-- providing a rollback migration
-- getting explicit human approval
-
----
-
-# 4. Soft-Delete & Data Retention
-
-## 4.1 PREFER SOFT DELETE OVER HARD DELETE
-
-The project has two soft-delete patterns. Always prefer one of these over hard delete:
-
-1. **Business soft-delete** (`is_active bool`): Sets `is_active = false` via `Updates`. Queries must include `WHERE is_active = true`.
-
-2. **GORM soft-delete** (`gorm.DeletedAt`): Uses `db.Delete()` which sets `deleted_at`. GORM automatically adds `WHERE deleted_at IS NULL`. Use `db.Unscoped()` to query including deleted records.
-
-Never use both patterns on the same model. Pick one and stick with it.
-
-## 4.2 DATA RETENTION GUARANTEES
-
-- Hard deletes require explicit human approval AND a documented retention policy
-- Never hard-delete records that may be needed for audit, compliance, or reference
-- When in doubt, soft-delete and let a separate cleanup job handle permanent removal
-- Always preserve created_at, updated_at, deleted_at timestamps for audit trails
-
----
-
-# 5. GORM-Specific Safety Rules
-
-These extend the project-specific GORM conventions from `gorm-rules.md`.
-
-## 5.1 AutoMigrate — Dev Only
-
-`RunMigration()` in `platform/database/migrate.go` uses `db.AutoMigrate()`. This is acceptable for:
-
-- Local development
-- Prototyping
-
-Production MUST use versioned schema migrations (e.g., golang-migrate).
-
-## 5.2 Never Use Save() for Partial Updates
-
-`Save()` overwrites zero-value fields. Always use `Updates(map[string]any{...})` for partial updates.
-
-## 5.3 Never Put Business Logic in BeforeCreate
-
-The `BeforeCreate` hook is used exclusively for UUID generation. No other logic is permitted.
-
-## 5.4 Never Call database.DB Globally
-
-Always inject `*gorm.DB` via constructor. Never import the global `database.DB` in business logic.
-
-## 5.5 Always Use WithContext(ctx)
-
-Never use bare `r.db` when context is available. Always use `r.db.WithContext(ctx)`.
-
-## 5.6 Never Put External API Calls Inside Transactions
-
-Holds locks; causes deadlocks. Complete external calls before transaction.
-
----
-
-# 6. Decision Framework
-
-When uncertain:
-
-- stop execution
-- ask human
-- preserve data
-- avoid irreversible actions
-
-Safety is always more important than automation.
-
----
-
-# 7. Behavioral Requirements
-
-The agent must:
-
-- think conservatively
-- warn before risk
-- explain consequences clearly
-- prefer additive changes
-- preserve auditability
-- avoid silent failures
-- avoid hidden side effects
-- flag any operation that could result in data loss
-- refuse to proceed with destructive operations without human confirmation
-- always provide rollback options when suggesting schema changes
-
-The agent must NEVER:
-
-- hide risk
-- skip validation
-- auto-confirm destructive actions
-- prioritize convenience over safety
-- continue after critical validation failures
-- silently apply irreversible migrations
-- assume a non-production environment without explicit confirmation
-- execute bulk modifications without a dry-run preview
-
----
-
-ASSUME ALL DATA IS IMPORTANT.
-ASSUME ALL PRODUCTION ACTIONS ARE HIGH RISK.
-IF UNSURE, STOP AND ASK HUMAN FIRST.
+MIT, unless a skill's own frontmatter states otherwise.
