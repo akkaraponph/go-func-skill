@@ -1,140 +1,90 @@
-# agentmd
+# Go Func Skill
 
-A small collection of **agent skills** — reusable, model-agnostic working disciplines and engineering conventions, each written as a single Markdown file an AI coding agent can load on demand.
+Two reusable skills for coding agents. Use **go-func** to structure and review Go monoliths, and **safety-first** to handle credentials, migrations, and data changes safely.
 
-The goal: capture the rules you'd otherwise repeat in every prompt ("don't delete data without asking", "where does this Go function belong?") once, in a form an agent can trigger automatically when the work matches.
+## Choose a skill
 
----
+| Skill | Use it when | Start here |
+| --- | --- | --- |
+| `go-func` | Adding a Go use case, repository, handler, or worker, or reviewing a domain package | [Go Func instructions](go-func/SKILL.md) |
+| `safety-first` | Loading required configuration or credentials, planning a migration, or reviewing bulk writes or deletes | [Safety-First instructions](safety-first/SKILL.md) |
 
-## What is a skill?
+The skills can work together. For example, use `go-func` to place a new repository and `safety-first` to plan the schema migration it needs.
 
-A skill is a folder containing a `SKILL.md` file. That file has two parts:
+## Install and try
 
-1. **Frontmatter** (YAML) — metadata the agent reads to decide *when* to use the skill.
-2. **Body** (Markdown) — the actual instructions, conventions, and checklists.
+Clone the repo and copy the full skill folders so the agent can find their references and scripts.
 
-The agent does not read every skill body all the time. It reads the short `description` from the frontmatter, and only pulls the full body into context when the current task matches. This keeps skills cheap to have installed and lets you accumulate many without bloating every prompt.
-
-```
-skill-name/
-└── SKILL.md          # frontmatter + instructions
-    └── references/   # optional: deeper docs loaded only when needed
-```
-
----
-
-## Skills in this repo
-
-| Skill | When it triggers | What it enforces |
-|-------|------------------|------------------|
-| [`safety-first`](safety-first/SKILL.md) | Writing/reviewing config, env, or credential code; DB migrations; bulk or destructive operations | No fallback default secrets, mandatory startup config validation, human confirmation before destructive ops, backups + dry-runs before migrations, soft-delete over hard-delete, transactional safety |
-| [`go-func`](go-func/SKILL.md) | Writing, structuring, or reviewing a Go monolith domain — "add a use case", "write a repository", "where does this function go?" | The three function types (Pure Logic / Side Effect / Orchestration), Ports & Adapters layout, append-only repos, publish-only events — selectable via a **Simple** or **Advanced** profile |
-
-### `safety-first`
-
-A zero-data-loss discipline for infrastructure and configuration work. It refuses silent fallbacks for secrets, requires required env vars to be validated at startup (fail-fast, not default-and-continue), and demands explicit human approval — with impact, affected resources, and a rollback plan — before anything destructive (drops, truncates, mass updates, teardown). It prefers additive migrations and soft-deletes, and includes ORM-specific guardrails (e.g. partial-update vs overwrite, context propagation, no external calls inside transactions).
-
-Its frontmatter runs it as a **deny-edit subagent** (`mode: subagent`, `permission.edit: deny`) so it can review and advise without modifying files.
-
-### `go-func`
-
-A Ports & Adapters (hexagonal) convention for Go monoliths, built around one rule: **every function is exactly one of three types** — Pure Logic (no I/O), Side Effect (DB/network/time/random, in adapters), or Orchestration (composes the two). That discipline is constant; the surrounding ceremony scales via a **profile**:
-
-- **Simple** — flat package per domain (files, not folders), services may call repositories directly, ordinary CRUD, interfaces only where you need a test/swap seam. For small or early monoliths.
-- **Advanced** — full `domain/port/application/adapter` split per domain, publish-only domain events, append-only repositories (no Update/Delete), compile-time interface checks, isolated bounded contexts for external integrations. For large, multi-domain systems.
-
-You can start Simple and graduate one domain at a time — promotion is moving files into folders, not a rewrite. The skill is **storage-agnostic** (no DB or library hard-coded).
-
----
-
-## Installing & using
-
-Skills work with any agent that can read Markdown instructions. For [Claude Code](https://claude.com/claude-code), install a skill by placing its folder in a skills directory:
-
-| Scope | Location | Effect |
-|-------|----------|--------|
-| **Personal** (all your projects) | `~/.claude/skills/<name>/` | Available in every session |
-| **Project** (shared with a repo) | `<repo>/.claude/skills/<name>/` | Available to anyone working in that repo |
-
-**macOS / Linux (bash):**
-
-```bash
-# Personal install (copy)
-cp -r go-func      ~/.claude/skills/go-func
-cp -r safety-first ~/.claude/skills/safety-first
-
-# …or symlink so they track this repo
-ln -s "$(pwd)/go-func"      ~/.claude/skills/go-func
-ln -s "$(pwd)/safety-first" ~/.claude/skills/safety-first
+```sh
+git clone https://github.com/akkaraponph/go-func-skill.git
+cd go-func-skill
 ```
 
-**Windows (PowerShell):**
+Choose a destination for your agent and scope. Project paths are relative to the target repository.
+
+| Agent | Personal | Project |
+| --- | --- | --- |
+| Codex | `~/.agents/skills/` | `.agents/skills/` |
+| Claude Code | `~/.claude/skills/` | `.claude/skills/` |
+
+On macOS or Linux, run this from the clone. This example installs both skills for Codex.
+
+```sh
+skills_dir="$HOME/.agents/skills"
+mkdir -p "$skills_dir"
+cp -R go-func safety-first "$skills_dir/"
+```
+
+In PowerShell, use the same destination for your chosen agent. This example installs both skills for Claude Code.
 
 ```powershell
-# Personal install (copy)
-Copy-Item -Recurse go-func      "$env:USERPROFILE\.claude\skills\go-func"
-Copy-Item -Recurse safety-first "$env:USERPROFILE\.claude\skills\safety-first"
-
-# …or symlink so they track this repo
-New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.claude\skills\go-func"      -Target "$pwd\go-func"
-New-Item -ItemType SymbolicLink -Path "$env:USERPROFILE\.claude\skills\safety-first" -Target "$pwd\safety-first"
+$skillsDir = Join-Path $HOME ".claude/skills"
+New-Item -ItemType Directory -Force -Path $skillsDir | Out-Null
+Copy-Item -Recurse -Path go-func,safety-first -Destination $skillsDir
 ```
 
-To install for a single repo instead of all your projects, swap `~/.claude/skills/` (or `$env:USERPROFILE\.claude\skills\`) for `<repo>/.claude/skills/`.
+Open your target project in the agent and try one of these prompts.
 
-Once installed, the agent triggers the skill automatically when a task matches its `description`. You don't have to name it — though you can invoke it explicitly (e.g. `/go-func` in Claude Code) to force it.
+> Use go-func to review this order package. Classify the functions and flag anything that mixes business rules with database access.
 
-For agents that aren't skill-aware, just point them at the `SKILL.md` file directly, or paste its body into your prompt / project instructions.
+> Use safety-first to review this migration. Identify the affected data, the backup and dry-run steps, and the rollback plan.
 
----
+Both agents can discover the skills from their descriptions. For manual selection, use `$go-func` in Codex or `/go-func` in Claude Code. With any other coding agent, point it at the relevant `SKILL.md`. See the [Codex skill docs](https://learn.chatgpt.com/docs/build-skills#where-codex-loads-local-skills) and [Claude Code skill docs](https://code.claude.com/docs/en/skills#choose-where-skills-load).
 
-## Authoring a new skill
+## Go Func profiles
 
-1. Create a folder named after the skill (kebab-case).
-2. Add a `SKILL.md` with frontmatter + body.
-3. Add a row to the table above.
+Go Func separates **Pure Logic** (deterministic business rules), **Side Effects** (such as storage, network, clock, and randomness), and **Orchestration** (use cases that compose them).
 
-### Frontmatter reference
+| Profile | Layout | Writes |
+| --- | --- | --- |
+| **Simple** | One flat package per domain, with interfaces where a test or swap needs them | Services call repositories directly. Ordinary CRUD is supported. |
+| **Advanced** | Separate `domain/`, `port/`, `application/`, and `adapter/` packages within each domain | Services publish events. Subscribers persist changes through append-only repositories. |
 
-```yaml
----
-name: my-skill                 # required — kebab-case, matches the folder
-description: >                 # required — what it does AND when to trigger.
-  One or two sentences. The agent matches the task against this, so name
-  concrete triggers ("write a repository", "before a migration").
-license: MIT                   # optional
-mode: subagent                 # optional — run as an isolated subagent
-model: anthropic/claude-...    # optional — pin a model for this skill
-permission:                    # optional — restrict what the skill may do
-  edit: deny                   #   e.g. a review-only skill that never writes
-  bash: allow
----
+Start with the [worked Simple `PlaceOrder` example](go-func/references/example.md). For event delivery guarantees, versioning, and how to migrate a domain in stages, read the [Advanced profile](go-func/references/advanced.md).
+
+## Run the architecture checker
+
+Run `archcheck` from the Go module you want to check. It requires Go 1.21 or later and scans packages under `internal/`. Adjust the script path to match your installation.
+
+```sh
+go run "$HOME/.agents/skills/go-func/scripts/archcheck.go"
+go test -race ./...
 ```
 
-The `description` is the most important field — it's the only part the agent sees before deciding to load the skill. Write it for *recall*: lead with the domain, then list concrete situations that should trigger it.
+The checker reports import boundaries, selected I/O and nondeterministic calls in Pure Logic files, and common mutation methods on Advanced repository interfaces. It prints `archcheck: clean` on success and exits nonzero when it finds violations or cannot run. Use the [Go Func review checklist](go-func/SKILL.md#review-checklist) for rules that require judgment.
 
-### Body guidance
+By default, `internal/platform` is treated as shared infrastructure. Pass `-shared platform,config` after the script path to replace the allowlist with both packages.
 
-- Lead with the single most important rule, then layer detail.
-- Prefer tables and checklists over prose — they're easier for an agent to apply.
-- Keep examples generic unless the skill is genuinely project-specific.
-- Push rarely-needed depth into `references/*.md` and mention when to read them, so the main body stays lean.
+## Safety-First and GORM
 
----
+Safety-First covers startup validation of required configuration, approval before destructive operations, and backups, dry runs, and rollback planning for migrations. For GORM projects, see the [GORM reference](safety-first/references/gorm.md) for partial updates, transaction settings, and soft deletes.
 
-## Repository layout
+## Contributing
 
-```
-agentmd/
-├── README.md            — this index
-├── safety-first/
-│   └── SKILL.md         — infra & config safety discipline
-└── go-func/
-    └── SKILL.md         — Go hexagonal convention (Simple / Advanced)
-```
+Keep each skill in its own folder with a `SKILL.md`. Match the frontmatter `name` to the folder name and use `description` to say when the agent should load it. Link optional examples and framework guidance from the skill and keep them in `references/`. Add new skills to the table above.
 
----
+When changing `archcheck`, verify it against a Go module with both a clean layout and a deliberate violation.
 
 ## License
 
-MIT, unless a skill's own frontmatter states otherwise.
+MIT, unless a skill's frontmatter specifies otherwise.

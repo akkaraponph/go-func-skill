@@ -1,11 +1,6 @@
 ---
 name: safety-first
 description: Safety-first infrastructure & configuration management — no fallback defaults, no destructive ops without approval, mandatory backups before migrations, dry-run requirements, transactional safety. Use when writing or reviewing config/env/credential code, database migrations, bulk operations, or any potentially destructive action.
-mode: subagent
-model: anthropic/claude-sonnet-4-6
-permission:
-  edit: deny
-  bash: allow
 ---
 
 # Role & Philosophy: Safety-First Infrastructure & Configuration Management
@@ -57,7 +52,7 @@ Forbidden patterns:
 
 ```
 BAD:  const secret = process.env.SECRET || "dev_secret"
-BAD:  os.Getenv("KEY") || "default"
+BAD:  key := cmp.Or(os.Getenv("KEY"), "default")
 BAD:  viper.SetDefault("SECRET", "...")
 BAD:  if env == "" { env = "dev-value" }
 ```
@@ -95,7 +90,7 @@ Otherwise:
 
 When reviewing or writing code, reject any of these patterns:
 
-- `os.Getenv("KEY") || "default"` or equivalent fallback chains
+- `cmp.Or(os.Getenv("KEY"), "default")` or equivalent fallback chains
 - `viper.SetDefault("SECRET", "...")` for any credential or sensitive value
 - `if env == "" { env = "dev-value" }` for secrets, keys, passwords, tokens, or DSNs
 - Environment variable reads scattered outside a single config-loading module
@@ -104,7 +99,7 @@ When reviewing or writing code, reject any of these patterns:
 
 ## 1.4 What to Enforce
 
-- All credential/env loading happens in one place (e.g., `platform/configs/`)
+- All credential/env loading happens in one config package
 - Every required key is checked for existence and non-emptiness at startup
 - Missing keys produce a `log.Fatalf` / `panic` / `os.Exit(1)` with a clear "CRITICAL CONFIGURATION ERROR" message
 - The application never reaches its first HTTP handler or consumer if a required key is absent
@@ -211,16 +206,10 @@ When supported:
 - rollback automatically on failure
 - never leave partially applied state
 
-The project uses `SkipDefaultTransaction: true` in GORM. This means:
-
-- GORM will NOT wrap single operations in implicit transactions
-- All multi-table writes MUST use explicit transactions
-- Single-table operations are safe without transactions (PostgreSQL autocommits)
-
 Rules:
 
-- Transaction boundary at orchestration/service layer
-- Never use GORM's implicit transaction wrapping
+- All multi-table writes MUST use explicit transactions
+- Transaction boundary at orchestration/service layer (under `go-func` Advanced, the save subscriber)
 - Keep transactions small — open, do work, close
 - Never put external API calls inside a transaction
 - Never put long-running computations inside a transaction
@@ -284,13 +273,13 @@ Without:
 
 ## 4.1 PREFER SOFT DELETE OVER HARD DELETE
 
-The project has two soft-delete patterns. Always prefer one of these over hard delete:
+Always prefer one of these over hard delete:
 
-1. **Business soft-delete** (`is_active bool`): Sets `is_active = false` via `Updates`. Queries must include `WHERE is_active = true`.
+1. **Active flag** (`is_active`): set it to false. Every query filters on `is_active = true`.
+2. **Deletion timestamp** (`deleted_at`): set it to the current time. Every query filters on `deleted_at IS NULL`.
+3. **Tombstone record** (append-only stores): add a cancellation record and leave the original untouched.
 
-2. **GORM soft-delete** (`gorm.DeletedAt`): Uses `db.Delete()` which sets `deleted_at`. GORM automatically adds `WHERE deleted_at IS NULL`. Use `db.Unscoped()` to query including deleted records.
-
-Never use both patterns on the same model. Pick one and stick with it.
+Use one pattern per model.
 
 ## 4.2 DATA RETENTION GUARANTEES
 
@@ -301,38 +290,9 @@ Never use both patterns on the same model. Pick one and stick with it.
 
 ---
 
-# 5. GORM-Specific Safety Rules
+# 5. ORM-Specific Safety Rules
 
-These extend the project-specific GORM conventions from `gorm-rules.md`.
-
-## 5.1 AutoMigrate — Dev Only
-
-`RunMigration()` in `platform/database/migrate.go` uses `db.AutoMigrate()`. This is acceptable for:
-
-- Local development
-- Prototyping
-
-Production MUST use versioned schema migrations (e.g., golang-migrate).
-
-## 5.2 Never Use Save() for Partial Updates
-
-`Save()` overwrites zero-value fields. Always use `Updates(map[string]any{...})` for partial updates.
-
-## 5.3 Never Put Business Logic in BeforeCreate
-
-The `BeforeCreate` hook is used exclusively for UUID generation. No other logic is permitted.
-
-## 5.4 Never Call database.DB Globally
-
-Always inject `*gorm.DB` via constructor. Never import the global `database.DB` in business logic.
-
-## 5.5 Always Use WithContext(ctx)
-
-Never use bare `r.db` when context is available. Always use `r.db.WithContext(ctx)`.
-
-## 5.6 Never Put External API Calls Inside Transactions
-
-Holds locks; causes deadlocks. Complete external calls before transaction.
+When the code uses GORM, read [`references/gorm.md`](references/gorm.md) before writing or reviewing it.
 
 ---
 
